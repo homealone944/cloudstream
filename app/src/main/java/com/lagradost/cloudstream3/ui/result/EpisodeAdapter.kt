@@ -21,7 +21,7 @@ import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
-import com.lagradost.cloudstream3.utils.AppUtils.html
+import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.UIHelper.setImage
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
 import com.lagradost.cloudstream3.utils.VideoDownloadHelper
@@ -57,8 +57,7 @@ const val ACTION_PLAY_EPISODE_IN_MPV = 17
 const val ACTION_MARK_AS_WATCHED = 18
 const val ACTION_FCAST = 19
 
-const val TV_EP_SIZE_LARGE = 400
-const val TV_EP_SIZE_SMALL = 300
+const val TV_EP_SIZE = 400
 data class EpisodeClickEvent(val action: Int, val data: ResultEpisode)
 
 class EpisodeAdapter(
@@ -181,7 +180,7 @@ class EpisodeAdapter(
         fun bind(card: ResultEpisode) {
             localCard = card
             val setWidth =
-                if (isLayout(TV or EMULATOR)) TV_EP_SIZE_LARGE.toPx else ViewGroup.LayoutParams.MATCH_PARENT
+                if (isLayout(TV or EMULATOR)) TV_EP_SIZE.toPx else ViewGroup.LayoutParams.MATCH_PARENT
 
             binding.episodeLinHolder.layoutParams.width = setWidth
             binding.episodeHolderLarge.layoutParams.width = setWidth
@@ -192,15 +191,15 @@ class EpisodeAdapter(
                 downloadButton.isVisible = hasDownloadSupport
                 downloadButton.setDefaultClickListener(
                     VideoDownloadHelper.DownloadEpisodeCached(
-                        card.name,
-                        card.poster,
-                        card.episode,
-                        card.season,
-                        card.id,
-                        card.parentId,
-                        card.rating,
-                        card.description,
-                        System.currentTimeMillis(),
+                        name = card.name,
+                        poster = card.poster,
+                        episode = card.episode,
+                        season = card.season,
+                        id = card.id,
+                        parentId = card.parentId,
+                        rating = card.rating,
+                        description = card.description,
+                        cacheTime = System.currentTimeMillis(),
                     ), null
                 ) {
                     when (it.action) {
@@ -336,22 +335,22 @@ class EpisodeAdapter(
         fun bind(card: ResultEpisode) {
             binding.episodeHolder.layoutParams.apply {
                 width =
-                    if (isLayout(TV or EMULATOR)) TV_EP_SIZE_SMALL.toPx else ViewGroup.LayoutParams.MATCH_PARENT
+                    if (isLayout(TV or EMULATOR)) TV_EP_SIZE.toPx else ViewGroup.LayoutParams.MATCH_PARENT
             }
 
             binding.apply {
                 downloadButton.isVisible = hasDownloadSupport
                 downloadButton.setDefaultClickListener(
                     VideoDownloadHelper.DownloadEpisodeCached(
-                        card.name,
-                        card.poster,
-                        card.episode,
-                        card.season,
-                        card.id,
-                        card.parentId,
-                        card.rating,
-                        card.description,
-                        System.currentTimeMillis(),
+                        name = card.name,
+                        poster = card.poster,
+                        episode = card.episode,
+                        season = card.season,
+                        id = card.id,
+                        parentId = card.parentId,
+                        rating = card.rating,
+                        description = card.description,
+                        cacheTime = System.currentTimeMillis(),
                     ), null
                 ) {
                     when (it.action) {

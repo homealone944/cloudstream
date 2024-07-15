@@ -17,7 +17,7 @@ import com.lagradost.cloudstream3.ui.SyncWatchType
 import com.lagradost.cloudstream3.ui.library.ListSorting
 import com.lagradost.cloudstream3.ui.result.txt
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.AppUtils.splitQuery
+import com.lagradost.cloudstream3.utils.AppContextUtils.splitQuery
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
@@ -32,6 +32,7 @@ class AniListApi(index: Int) : AccountManager(index), SyncAPI {
     override val redirectUrl = "anilistlogin"
     override val idPrefix = "anilist"
     override var requireLibraryRefresh = true
+    override val supportDeviceAuth = false
     override var mainUrl = "https://anilist.co"
     override val icon = R.drawable.ic_anilist_icon
     override val requiresLogin = false

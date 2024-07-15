@@ -16,17 +16,11 @@ import com.lagradost.cloudstream3.utils.DataStore.getFolderName
 import com.lagradost.cloudstream3.utils.DataStore.getKey
 import com.lagradost.cloudstream3.utils.DataStore.getKeys
 import com.lagradost.cloudstream3.utils.VideoDownloadHelper
-import com.lagradost.cloudstream3.utils.VideoDownloadManager
+import com.lagradost.cloudstream3.utils.VideoDownloadManager.getDownloadFileInfoAndUpdateSettings
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class DownloadViewModel : ViewModel() {
-    private val _noDownloadsText = MutableLiveData<String>().apply {
-        value = ""
-    }
-    val noDownloadsText: LiveData<String> = _noDownloadsText
-
     private val _headerCards =
         MutableLiveData<List<VisualDownloadHeaderCached>>().apply { listOf<VisualDownloadHeaderCached>() }
     val headerCards: LiveData<List<VisualDownloadHeaderCached>> = _headerCards
@@ -39,10 +33,12 @@ class DownloadViewModel : ViewModel() {
     val availableBytes: LiveData<Long> = _availableBytes
     val downloadBytes: LiveData<Long> = _downloadBytes
 
+    private var previousVisual: List<VisualDownloadHeaderCached>? = null
+
     fun updateList(context: Context) = viewModelScope.launchSafe {
         val children = withContext(Dispatchers.IO) {
-            val headers = context.getKeys(DOWNLOAD_EPISODE_CACHE)
-            headers.mapNotNull { context.getKey<VideoDownloadHelper.DownloadEpisodeCached>(it) }
+            context.getKeys(DOWNLOAD_EPISODE_CACHE)
+                .mapNotNull { context.getKey<VideoDownloadHelper.DownloadEpisodeCached>(it) }
                 .distinctBy { it.id } // Remove duplicates
         }
 
@@ -53,13 +49,12 @@ class DownloadViewModel : ViewModel() {
         // parentId : downloadsCount
         val totalDownloads = HashMap<Int, Int>()
 
-
         // Gets all children downloads
         withContext(Dispatchers.IO) {
-            for (c in children) {
-                val childFile = VideoDownloadManager.getDownloadFileInfoAndUpdateSettings(context, c.id) ?: continue
+            children.forEach { c ->
+                val childFile = getDownloadFileInfoAndUpdateSettings(context, c.id) ?: return@forEach
 
-                if (childFile.fileLength <= 1) continue
+                if (childFile.fileLength <= 1) return@forEach
                 val len = childFile.totalBytes
                 val flen = childFile.fileLength
 
@@ -69,7 +64,7 @@ class DownloadViewModel : ViewModel() {
             }
         }
 
-        val cached = withContext(Dispatchers.IO) { // wont fetch useless keys
+        val cached = withContext(Dispatchers.IO) { // Won't fetch useless keys
             totalDownloads.entries.filter { it.value > 0 }.mapNotNull {
                 context.getKey<VideoDownloadHelper.DownloadHeaderCached>(
                     DOWNLOAD_HEADER_CACHE,
@@ -79,7 +74,7 @@ class DownloadViewModel : ViewModel() {
         }
 
         val visual = withContext(Dispatchers.IO) {
-            cached.mapNotNull { // TODO FIX
+            cached.mapNotNull {
                 val downloads = totalDownloads[it.id] ?: 0
                 val bytes = totalBytesUsedByChild[it.id] ?: 0
                 val currentBytes = currentBytesUsedByChild[it.id] ?: 0
@@ -91,32 +86,37 @@ class DownloadViewModel : ViewModel() {
                         getFolderName(it.id.toString(), it.id.toString())
                     )
                 VisualDownloadHeaderCached(
-                    0,
-                    downloads,
-                    bytes,
-                    currentBytes,
-                    it,
-                    movieEpisode
+                    currentBytes = currentBytes,
+                    totalBytes = bytes,
+                    data = it,
+                    child = movieEpisode,
+                    currentOngoingDownloads = 0,
+                    totalDownloads = downloads,
                 )
             }.sortedBy {
                 (it.child?.episode ?: 0) + (it.child?.season?.times(10000) ?: 0)
-            } // episode sorting by episode, lowest to highest
-        }
-        try {
-            val stat = StatFs(Environment.getExternalStorageDirectory().path)
-
-            val localBytesAvailable = stat.availableBytes//stat.blockSizeLong * stat.blockCountLong
-            val localTotalBytes = stat.blockSizeLong * stat.blockCountLong
-            val localDownloadedBytes = visual.sumOf { it.totalBytes }
-
-            _usedBytes.postValue(localTotalBytes - localBytesAvailable - localDownloadedBytes)
-            _availableBytes.postValue(localBytesAvailable)
-            _downloadBytes.postValue(localDownloadedBytes)
-        } catch (t : Throwable) {
-            _downloadBytes.postValue(0)
-            logError(t)
+            } // Episode sorting by episode, lowest to highest
         }
 
-        _headerCards.postValue(visual)
+        // Only update list if different from the previous one to prevent duplicate initialization
+        if (visual != previousVisual) {
+            previousVisual = visual
+
+            try {
+                val stat = StatFs(Environment.getExternalStorageDirectory().path)
+                val localBytesAvailable = stat.availableBytes
+                val localTotalBytes = stat.blockSizeLong * stat.blockCountLong
+                val localDownloadedBytes = visual.sumOf { it.totalBytes }
+
+                _usedBytes.postValue(localTotalBytes - localBytesAvailable - localDownloadedBytes)
+                _availableBytes.postValue(localBytesAvailable)
+                _downloadBytes.postValue(localDownloadedBytes)
+            } catch (t: Throwable) {
+                _downloadBytes.postValue(0)
+                logError(t)
+            }
+
+            _headerCards.postValue(visual)
+        }
     }
 }

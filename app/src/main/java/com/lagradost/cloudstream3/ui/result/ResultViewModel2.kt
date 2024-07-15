@@ -18,7 +18,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.APIHolder.apis
-import com.lagradost.cloudstream3.APIHolder.getId
+import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
 import com.lagradost.cloudstream3.APIHolder.unixTime
 import com.lagradost.cloudstream3.APIHolder.unixTimeMS
 import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
@@ -29,6 +29,15 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
 import com.lagradost.cloudstream3.LoadResponse.Companion.getAniListId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getMalId
 import com.lagradost.cloudstream3.LoadResponse.Companion.isMovie
+import com.lagradost.cloudstream3.LoadResponse.Companion.readIdFromString
+import com.lagradost.cloudstream3.MainActivity.Companion.MPV
+import com.lagradost.cloudstream3.MainActivity.Companion.MPV_COMPONENT
+import com.lagradost.cloudstream3.MainActivity.Companion.MPV_PACKAGE
+import com.lagradost.cloudstream3.MainActivity.Companion.VLC
+import com.lagradost.cloudstream3.MainActivity.Companion.VLC_COMPONENT
+import com.lagradost.cloudstream3.MainActivity.Companion.VLC_PACKAGE
+import com.lagradost.cloudstream3.MainActivity.Companion.WEB_VIDEO
+import com.lagradost.cloudstream3.MainActivity.Companion.WEB_VIDEO_CAST_PACKAGE
 import com.lagradost.cloudstream3.metaproviders.SyncRedirector
 import com.lagradost.cloudstream3.mvvm.*
 import com.lagradost.cloudstream3.syncproviders.AccountManager
@@ -47,10 +56,11 @@ import com.lagradost.cloudstream3.ui.player.SubtitleData
 import com.lagradost.cloudstream3.ui.result.EpisodeAdapter.Companion.getPlayerAction
 import com.lagradost.cloudstream3.ui.subtitles.SubtitlesFragment
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.getNameFull
-import com.lagradost.cloudstream3.utils.AppUtils.isAppInstalled
-import com.lagradost.cloudstream3.utils.AppUtils.isConnectedToChromecast
-import com.lagradost.cloudstream3.utils.AppUtils.setDefaultFocus
+import com.lagradost.cloudstream3.utils.AppContextUtils.getNameFull
+import com.lagradost.cloudstream3.utils.AppContextUtils.isAppInstalled
+import com.lagradost.cloudstream3.utils.AppContextUtils.isConnectedToChromecast
+import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
+import com.lagradost.cloudstream3.utils.AppContextUtils.sortSubs
 import com.lagradost.cloudstream3.utils.CastHelper.startCast
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.ioWork
@@ -292,6 +302,23 @@ fun LoadResponse.toResultData(repo: APIRepository): ResultData {
     )
 }
 
+data class ExtractorSubtitleLink(
+    val name: String,
+    override val url: String,
+    override val referer: String,
+    override val headers: Map<String, String> = mapOf()
+) : IDownloadableMinimum
+
+fun LoadResponse.getId(): Int {
+    // this fixes an issue with outdated api as getLoadResponseIdFromUrl might be fucked
+    return (if (this is ResultViewModel2.LoadResponseFromSearch) this.id else null)
+        ?: getLoadResponseIdFromUrl(url, apiName)
+}
+
+private fun getLoadResponseIdFromUrl(url: String, apiName: String): Int {
+    return url.replace(getApiFromNameNull(apiName)?.mainUrl ?: "", "").replace("/", "")
+        .hashCode()
+}
 
 data class LinkProgress(
     val linksLoaded: Int,
@@ -696,13 +723,13 @@ class ResultViewModel2 : ViewModel() {
                     DOWNLOAD_HEADER_CACHE,
                     parentId.toString(),
                     VideoDownloadHelper.DownloadHeaderCached(
-                        apiName,
-                        url,
-                        currentType,
-                        currentHeaderName,
-                        currentPoster,
-                        parentId,
-                        System.currentTimeMillis(),
+                        apiName = apiName,
+                        url = url,
+                        type = currentType,
+                        name = currentHeaderName,
+                        poster = currentPoster,
+                        id = parentId,
+                        cacheTime = System.currentTimeMillis(),
                     )
                 )
 
@@ -713,15 +740,15 @@ class ResultViewModel2 : ViewModel() {
                     ), // 3 deep folder for faster acess
                     episode.id.toString(),
                     VideoDownloadHelper.DownloadEpisodeCached(
-                        episode.name,
-                        episode.poster,
-                        episode.episode,
-                        episode.season,
-                        episode.id,
-                        parentId,
-                        episode.rating,
-                        episode.description,
-                        System.currentTimeMillis(),
+                        name = episode.name,
+                        poster = episode.poster,
+                        episode = episode.episode,
+                        season = episode.season,
+                        id = episode.id,
+                        parentId = parentId,
+                        rating = episode.rating,
+                        description = episode.description,
+                        cacheTime = System.currentTimeMillis(),
                     )
                 )
 
@@ -847,7 +874,7 @@ class ResultViewModel2 : ViewModel() {
         loadResponse: LoadResponse? = null,
         statusChangedCallback: ((statusChanged: Boolean) -> Unit)? = null
     ) {
-        val (response,currentId) = loadResponse?.let { load ->
+        val (response, currentId) = loadResponse?.let { load ->
             (load to load.getId())
         } ?: ((currentResponse ?: return) to (currentId ?: return))
 
@@ -1131,12 +1158,16 @@ class ResultViewModel2 : ViewModel() {
 
         val message = if (duplicateEntries.size == 1) {
             val list = when (listType) {
-                LibraryListType.BOOKMARKS -> getResultWatchState(duplicateEntries[0].id ?: 0).stringRes
+                LibraryListType.BOOKMARKS -> getResultWatchState(
+                    duplicateEntries[0].id ?: 0
+                ).stringRes
+
                 LibraryListType.FAVORITES -> R.string.favorites_list_name
                 LibraryListType.SUBSCRIPTIONS -> R.string.subscription_list_name
             }
 
-            context.getString(R.string.duplicate_message_single,
+            context.getString(
+                R.string.duplicate_message_single,
                 "${normalizeString(duplicateEntries[0].name)} (${context.getString(list)}) — ${duplicateEntries[0].apiName}"
             )
         } else {
@@ -1161,9 +1192,11 @@ class ResultViewModel2 : ViewModel() {
                     DialogInterface.BUTTON_POSITIVE -> {
                         checkDuplicatesCallback.invoke(true, emptyList())
                     }
+
                     DialogInterface.BUTTON_NEGATIVE -> {
                         checkDuplicatesCallback.invoke(false, emptyList())
                     }
+
                     DialogInterface.BUTTON_NEUTRAL -> {
                         checkDuplicatesCallback.invoke(true, duplicateEntries.map { it.id })
                     }
@@ -1180,17 +1213,17 @@ class ResultViewModel2 : ViewModel() {
 
     private fun getImdbIdFromSyncData(syncData: Map<String, String>?): String? {
         return normalSafeApiCall {
-            SimklApi.readIdFromString(
+            readIdFromString(
                 syncData?.get(AccountManager.simklApi.idPrefix)
-            )[SimklApi.Companion.SyncServices.Imdb]
+            )[SimklSyncServices.Imdb]
         }
     }
 
     private fun getTMDbIdFromSyncData(syncData: Map<String, String>?): String? {
         return normalSafeApiCall {
-            SimklApi.readIdFromString(
+            readIdFromString(
                 syncData?.get(AccountManager.simklApi.idPrefix)
-            )[SimklApi.Companion.SyncServices.Tmdb]
+            )[SimklSyncServices.Tmdb]
         }
     }
 
@@ -1294,7 +1327,8 @@ class ResultViewModel2 : ViewModel() {
             postPopup(
                 text,
                 links.links.apmap {
-                    val size = it.getVideoSize()?.let { size -> " " + formatFileSize(context, size) } ?: ""
+                    val size =
+                        it.getVideoSize()?.let { size -> " " + formatFileSize(context, size) } ?: ""
                     txt("${it.name} ${Qualities.getStringByInt(it.quality)}$size")
                 }) {
                 callback.invoke(links to (it ?: return@postPopup))
@@ -1354,7 +1388,7 @@ class ResultViewModel2 : ViewModel() {
 
     private fun launchActivity(
         activity: Activity?,
-        resumeApp: ResultResume,
+        resumeApp: MainActivity.Companion.ResultResume,
         id: Int? = null,
         work: suspend (Intent.(Activity) -> Unit)
     ): Job? {
@@ -1719,7 +1753,7 @@ class ResultViewModel2 : ViewModel() {
                         txt(R.string.episode_action_cast_mirror)
                     ) { (result, index) ->
                         val host = device?.host ?: return@acquireSingleLink
-                        val link = result.links.firstOrNull() ?: return@acquireSingleLink
+                        val link = result.links.getOrNull(index) ?: return@acquireSingleLink
 
                         FcastSession(host).use { session ->
                             session.sendMessage(
@@ -1919,7 +1953,8 @@ class ResultViewModel2 : ViewModel() {
                             .distinct().map {
                                 // this actually would be nice if we improved a bit as 3rd season == season 3 == III ect
                                 // right now it just removes the dubbed status
-                                it.lowercase().replace(Regex("""\(?[ds]ub(bed)?\)?(\s|$)""") , "").trim()
+                                it.lowercase().replace(Regex("""\(?[ds]ub(bed)?\)?(\s|$)"""), "")
+                                    .trim()
                             },
                         TrackerType.getTypes(this.type),
                         this.year
@@ -2267,7 +2302,7 @@ class ResultViewModel2 : ViewModel() {
 
     private suspend fun postSuccessful(
         loadResponse: LoadResponse,
-        mainId : Int,
+        mainId: Int,
         apiRepository: APIRepository,
         updateEpisodes: Boolean,
         updateFillers: Boolean,
@@ -2283,7 +2318,11 @@ class ResultViewModel2 : ViewModel() {
             postEpisodes(loadResponse, mainId, updateFillers)
     }
 
-    private suspend fun postEpisodes(loadResponse: LoadResponse, mainId : Int, updateFillers: Boolean) {
+    private suspend fun postEpisodes(
+        loadResponse: LoadResponse,
+        mainId: Int,
+        updateFillers: Boolean
+    ) {
         _episodes.postValue(Resource.Loading())
 
         if (updateFillers && loadResponse is AnimeLoadResponse) {
@@ -2304,7 +2343,12 @@ class ResultViewModel2 : ViewModel() {
                                 ?: 0)
 
                         val totalIndex =
-                            i.season?.let { season -> loadResponse.getTotalEpisodeIndex(episode, season) }
+                            i.season?.let { season ->
+                                loadResponse.getTotalEpisodeIndex(
+                                    episode,
+                                    season
+                                )
+                            }
 
                         if (!existingEpisodes.contains(id)) {
                             existingEpisodes.add(id)
@@ -2357,7 +2401,12 @@ class ResultViewModel2 : ViewModel() {
                             loadResponse.seasonNames.getSeason(episode.season)
 
                         val totalIndex =
-                            episode.season?.let { season -> loadResponse.getTotalEpisodeIndex(episodeIndex, season) }
+                            episode.season?.let { season ->
+                                loadResponse.getTotalEpisodeIndex(
+                                    episodeIndex,
+                                    season
+                                )
+                            }
 
                         val ep =
                             buildResultEpisode(
@@ -2409,7 +2458,7 @@ class ResultViewModel2 : ViewModel() {
                         null,
                         loadResponse.type,
                         mainId,
-                        null
+                        null,
                     )
                 )
             }
@@ -2537,7 +2586,13 @@ class ResultViewModel2 : ViewModel() {
             ResumeProgress(
                 progress = (viewPos.position / 1000).toInt(),
                 maxProgress = (viewPos.duration / 1000).toInt(),
-                txt(R.string.resume_remaining, secondsToReadable(((viewPos.duration - viewPos.position) / 1_000).toInt(), "0 mins"))
+                txt(
+                    R.string.resume_remaining,
+                    secondsToReadable(
+                        ((viewPos.duration - viewPos.position) / 1_000).toInt(),
+                        "0 mins"
+                    )
+                )
             )
         }
 
@@ -2663,17 +2718,26 @@ class ResultViewModel2 : ViewModel() {
         override var posterHeaders: Map<String, String>? = null,
         override var backgroundPosterUrl: String? = null,
         override var contentRating: String? = null,
-        val id : Int?,
+        val id: Int?,
     ) : LoadResponse
 
-    fun loadSmall(activity: Activity?, searchResponse : SearchResponse) = ioSafe {
+    fun loadSmall(activity: Activity?, searchResponse: SearchResponse) = ioSafe {
         val url = searchResponse.url
         _page.postValue(Resource.Loading(url))
         _episodes.postValue(Resource.Loading())
-        val api = APIHolder.getApiFromNameNull(searchResponse.apiName) ?: APIHolder.getApiFromUrlNull(searchResponse.url) ?: APIRepository.noneApi
+        val api =
+            APIHolder.getApiFromNameNull(searchResponse.apiName) ?: APIHolder.getApiFromUrlNull(
+                searchResponse.url
+            ) ?: APIRepository.noneApi
         val repo = APIRepository(api)
-        val response = LoadResponseFromSearch(name = searchResponse.name, url = searchResponse.url, apiName = api.name, type = searchResponse.type ?: TvType.Others,
-            posterUrl = searchResponse.posterUrl, id = searchResponse.id).apply {
+        val response = LoadResponseFromSearch(
+            name = searchResponse.name,
+            url = searchResponse.url,
+            apiName = api.name,
+            type = searchResponse.type ?: TvType.Others,
+            posterUrl = searchResponse.posterUrl,
+            id = searchResponse.id
+        ).apply {
             if (searchResponse is SyncAPI.LibraryItem) {
                 this.plot = searchResponse.plot
                 this.rating = searchResponse.personalRating?.times(100) ?: searchResponse.rating
@@ -2692,7 +2756,8 @@ class ResultViewModel2 : ViewModel() {
             mainId = mainId,
             apiRepository = repo,
             updateEpisodes = false,
-            updateFillers =  false)
+            updateFillers = false
+        )
     }
 
     fun load(
@@ -2767,13 +2832,13 @@ class ResultViewModel2 : ViewModel() {
                         DOWNLOAD_HEADER_CACHE,
                         mainId.toString(),
                         VideoDownloadHelper.DownloadHeaderCached(
-                            apiName,
-                            validUrl,
-                            loadResponse.type,
-                            loadResponse.name,
-                            loadResponse.posterUrl,
-                            mainId,
-                            System.currentTimeMillis(),
+                            apiName = apiName,
+                            url = validUrl,
+                            type = loadResponse.type,
+                            name = loadResponse.name,
+                            poster = loadResponse.posterUrl,
+                            id = mainId,
+                            cacheTime = System.currentTimeMillis(),
                         )
                     )
                     if (loadTrailers)

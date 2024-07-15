@@ -44,9 +44,6 @@ import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.LinearSnapHelper
 import androidx.recyclerview.widget.RecyclerView
-import com.fasterxml.jackson.databind.DeserializationFeature
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.Session
 import com.google.android.gms.cast.framework.SessionManager
@@ -59,9 +56,7 @@ import com.google.common.collect.Comparators.min
 import com.jaredrummler.android.colorpicker.ColorPickerDialogListener
 import com.lagradost.cloudstream3.APIHolder.allProviders
 import com.lagradost.cloudstream3.APIHolder.apis
-import com.lagradost.cloudstream3.APIHolder.getApiDubstatusSettings
 import com.lagradost.cloudstream3.APIHolder.initAll
-import com.lagradost.cloudstream3.APIHolder.updateHasTrailers
 import com.lagradost.cloudstream3.AcraApplication.Companion.getKey
 import com.lagradost.cloudstream3.AcraApplication.Companion.removeKey
 import com.lagradost.cloudstream3.AcraApplication.Companion.setKey
@@ -95,12 +90,14 @@ import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.appStri
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.appStringResumeWatching
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.appStringSearch
 import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.inAppAuths
+import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.localListApi
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
 import com.lagradost.cloudstream3.ui.APIRepository
 import com.lagradost.cloudstream3.ui.SyncWatchType
 import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.ui.download.DOWNLOAD_NAVIGATE_TO
 import com.lagradost.cloudstream3.ui.home.HomeViewModel
+import com.lagradost.cloudstream3.ui.library.LibraryViewModel
 import com.lagradost.cloudstream3.ui.player.BasicLink
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
 import com.lagradost.cloudstream3.ui.player.LinkGenerator
@@ -122,19 +119,21 @@ import com.lagradost.cloudstream3.ui.settings.SettingsGeneral
 import com.lagradost.cloudstream3.ui.setup.HAS_DONE_SETUP_KEY
 import com.lagradost.cloudstream3.ui.setup.SetupFragmentExtensions
 import com.lagradost.cloudstream3.utils.ApkInstaller
-import com.lagradost.cloudstream3.utils.AppUtils.html
-import com.lagradost.cloudstream3.utils.AppUtils.isCastApiAvailable
-import com.lagradost.cloudstream3.utils.AppUtils.isLtr
-import com.lagradost.cloudstream3.utils.AppUtils.isNetworkAvailable
-import com.lagradost.cloudstream3.utils.AppUtils.isRtl
-import com.lagradost.cloudstream3.utils.AppUtils.loadCache
-import com.lagradost.cloudstream3.utils.AppUtils.loadRepository
-import com.lagradost.cloudstream3.utils.AppUtils.loadResult
-import com.lagradost.cloudstream3.utils.AppUtils.loadSearchResult
-import com.lagradost.cloudstream3.utils.AppUtils.setDefaultFocus
+import com.lagradost.cloudstream3.utils.AppContextUtils.getApiDubstatusSettings
+import com.lagradost.cloudstream3.utils.AppContextUtils.html
+import com.lagradost.cloudstream3.utils.AppContextUtils.isCastApiAvailable
+import com.lagradost.cloudstream3.utils.AppContextUtils.isLtr
+import com.lagradost.cloudstream3.utils.AppContextUtils.isNetworkAvailable
+import com.lagradost.cloudstream3.utils.AppContextUtils.isRtl
+import com.lagradost.cloudstream3.utils.AppContextUtils.loadCache
+import com.lagradost.cloudstream3.utils.AppContextUtils.loadRepository
+import com.lagradost.cloudstream3.utils.AppContextUtils.loadResult
+import com.lagradost.cloudstream3.utils.AppContextUtils.loadSearchResult
+import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
+import com.lagradost.cloudstream3.utils.AppContextUtils.updateHasTrailers
 import com.lagradost.cloudstream3.utils.BackupUtils.backup
 import com.lagradost.cloudstream3.utils.BackupUtils.setUpBackup
-import com.lagradost.cloudstream3.utils.BiometricAuthenticator
+import com.lagradost.cloudstream3.utils.BiometricAuthenticator.BiometricCallback
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator.biometricPrompt
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator.deviceHasPasswordPinLock
 import com.lagradost.cloudstream3.utils.BiometricAuthenticator.isAuthEnabled
@@ -162,8 +161,6 @@ import com.lagradost.cloudstream3.utils.UIHelper.toPx
 import com.lagradost.cloudstream3.utils.USER_PROVIDER_API
 import com.lagradost.cloudstream3.utils.USER_SELECTED_HOMEPAGE_API
 import com.lagradost.cloudstream3.utils.fcast.FcastManager
-import com.lagradost.nicehttp.Requests
-import com.lagradost.nicehttp.ResponseParser
 import com.lagradost.safefile.SafeFile
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -174,7 +171,6 @@ import java.net.URLDecoder
 import java.nio.charset.Charset
 import kotlin.math.abs
 import kotlin.math.absoluteValue
-import kotlin.reflect.KClass
 import kotlin.system.exitProcess
 
 //https://github.com/videolan/vlc-android/blob/3706c4be2da6800b3d26344fc04fab03ffa4b860/application/vlc-android/src/org/videolan/vlc/gui/video/VideoPlayerActivity.kt#L1898
@@ -187,117 +183,92 @@ import kotlin.system.exitProcess
 
 //https://github.com/jellyfin/jellyfin-android/blob/6cbf0edf84a3da82347c8d59b5d5590749da81a9/app/src/main/java/org/jellyfin/mobile/bridge/ExternalPlayer.kt#L225
 
-const val VLC_PACKAGE = "org.videolan.vlc"
-const val MPV_PACKAGE = "is.xyz.mpv"
-const val WEB_VIDEO_CAST_PACKAGE = "com.instantbits.cast.webvideo"
-
-val VLC_COMPONENT = ComponentName(VLC_PACKAGE, "$VLC_PACKAGE.gui.video.VideoPlayerActivity")
-val MPV_COMPONENT = ComponentName(MPV_PACKAGE, "$MPV_PACKAGE.MPVActivity")
-
-//TODO REFACTOR AF
-open class ResultResume(
-    val packageString: String,
-    val action: String = Intent.ACTION_VIEW,
-    val position: String? = null,
-    val duration: String? = null,
-    var launcher: ActivityResultLauncher<Intent>? = null,
-) {
-    val defaultTime = -1L
-
-    val lastId get() = "${packageString}_last_open_id"
-    suspend fun launch(id: Int?, callback: suspend Intent.() -> Unit) {
-        val intent = Intent(action)
-
-        if (id != null)
-            setKey(lastId, id)
-        else
-            removeKey(lastId)
-
-        intent.setPackage(packageString)
-        callback.invoke(intent)
-        launcher?.launch(intent)
-    }
-
-    open fun getPosition(intent: Intent?): Long {
-        return defaultTime
-    }
-
-    open fun getDuration(intent: Intent?): Long {
-        return defaultTime
-    }
-}
-
-val VLC = object : ResultResume(
-    VLC_PACKAGE,
-    // Android 13 intent restrictions fucks up specifically launching the VLC player
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-        "org.videolan.vlc.player.result"
-    } else {
-        Intent.ACTION_VIEW
-    },
-    "extra_position",
-    "extra_duration",
-) {
-    override fun getPosition(intent: Intent?): Long {
-        return intent?.getLongExtra(this.position, defaultTime) ?: defaultTime
-    }
-
-    override fun getDuration(intent: Intent?): Long {
-        return intent?.getLongExtra(this.duration, defaultTime) ?: defaultTime
-    }
-}
-
-val MPV = object : ResultResume(
-    MPV_PACKAGE,
-    //"is.xyz.mpv.MPVActivity.result", // resume not working :pensive:
-    position = "position",
-    duration = "duration",
-) {
-    override fun getPosition(intent: Intent?): Long {
-        return intent?.getIntExtra(this.position, defaultTime.toInt())?.toLong() ?: defaultTime
-    }
-
-    override fun getDuration(intent: Intent?): Long {
-        return intent?.getIntExtra(this.duration, defaultTime.toInt())?.toLong() ?: defaultTime
-    }
-}
-
-val WEB_VIDEO = ResultResume(WEB_VIDEO_CAST_PACKAGE)
-
-val resumeApps = arrayOf(
-    VLC, MPV, WEB_VIDEO
-)
-
-// Short name for requests client to make it nicer to use
-
-var app = Requests(responseParser = object : ResponseParser {
-    val mapper: ObjectMapper = jacksonObjectMapper().configure(
-        DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES,
-        false
-    )
-
-    override fun <T : Any> parse(text: String, kClass: KClass<T>): T {
-        return mapper.readValue(text, kClass.java)
-    }
-
-    override fun <T : Any> parseSafe(text: String, kClass: KClass<T>): T? {
-        return try {
-            mapper.readValue(text, kClass.java)
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    override fun writeValueAsString(obj: Any): String {
-        return mapper.writeValueAsString(obj)
-    }
-}).apply {
-    defaultHeaders = mapOf("user-agent" to USER_AGENT)
-}
-
-class MainActivity : AppCompatActivity(), ColorPickerDialogListener,
-    BiometricAuthenticator.BiometricAuthCallback {
+class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCallback {
     companion object {
+        const val VLC_PACKAGE = "org.videolan.vlc"
+        const val MPV_PACKAGE = "is.xyz.mpv"
+        const val WEB_VIDEO_CAST_PACKAGE = "com.instantbits.cast.webvideo"
+
+        val VLC_COMPONENT = ComponentName(VLC_PACKAGE, "$VLC_PACKAGE.gui.video.VideoPlayerActivity")
+        val MPV_COMPONENT = ComponentName(MPV_PACKAGE, "$MPV_PACKAGE.MPVActivity")
+
+        //TODO REFACTOR AF
+        open class ResultResume(
+            val packageString: String,
+            val action: String = Intent.ACTION_VIEW,
+            val position: String? = null,
+            val duration: String? = null,
+            var launcher: ActivityResultLauncher<Intent>? = null,
+        ) {
+            val defaultTime = -1L
+
+            val lastId get() = "${packageString}_last_open_id"
+            suspend fun launch(id: Int?, callback: suspend Intent.() -> Unit) {
+                val intent = Intent(action)
+
+                if (id != null)
+                    setKey(lastId, id)
+                else
+                    removeKey(lastId)
+
+                intent.setPackage(packageString)
+                callback.invoke(intent)
+                launcher?.launch(intent)
+            }
+
+            open fun getPosition(intent: Intent?): Long {
+                return defaultTime
+            }
+
+            open fun getDuration(intent: Intent?): Long {
+                return defaultTime
+            }
+        }
+
+        val VLC = object : ResultResume(
+            VLC_PACKAGE,
+            // Android 13 intent restrictions fucks up specifically launching the VLC player
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                "org.videolan.vlc.player.result"
+            } else {
+                Intent.ACTION_VIEW
+            },
+            "extra_position",
+            "extra_duration",
+        ) {
+            override fun getPosition(intent: Intent?): Long {
+                return intent?.getLongExtra(this.position, defaultTime) ?: defaultTime
+            }
+
+            override fun getDuration(intent: Intent?): Long {
+                return intent?.getLongExtra(this.duration, defaultTime) ?: defaultTime
+            }
+        }
+
+        val MPV = object : ResultResume(
+            MPV_PACKAGE,
+            //"is.xyz.mpv.MPVActivity.result", // resume not working :pensive:
+            position = "position",
+            duration = "duration",
+        ) {
+            override fun getPosition(intent: Intent?): Long {
+                return intent?.getIntExtra(this.position, defaultTime.toInt())?.toLong()
+                    ?: defaultTime
+            }
+
+            override fun getDuration(intent: Intent?): Long {
+                return intent?.getIntExtra(this.duration, defaultTime.toInt())?.toLong()
+                    ?: defaultTime
+            }
+        }
+
+        val WEB_VIDEO = ResultResume(WEB_VIDEO_CAST_PACKAGE)
+
+        val resumeApps = arrayOf(
+            VLC, MPV, WEB_VIDEO
+        )
+
+
         const val TAG = "MAINACT"
         const val ANIMATED_OUTLINE: Boolean = false
         var lastError: String? = null
@@ -596,18 +567,10 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener,
                 false
             }
         }
+
         binding?.apply {
-            navView.isVisible = isNavVisible && !landscape
             navRailView.isVisible = isNavVisible && landscape
-
-            // Hide library on TV since it is not supported yet :(
-            //val isTrueTv = isTrueTvSettings()
-            //navView.menu.findItem(R.id.navigation_library)?.isVisible = !isTrueTv
-            //navRailView.menu.findItem(R.id.navigation_library)?.isVisible = !isTrueTv
-
-            // Hide downloads on TV
-            //navView.menu.findItem(R.id.navigation_downloads)?.isVisible = !isTrueTv
-            //navRailView.menu.findItem(R.id.navigation_downloads)?.isVisible = !isTrueTv
+            navView.isVisible = isNavVisible && !landscape
         }
     }
 
@@ -677,7 +640,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener,
         }
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent?): Boolean {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val response = CommonActivity.dispatchKeyEvent(this, event)
         if (response != null)
             return response
@@ -796,14 +759,14 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener,
 
     lateinit var viewModel: ResultViewModel2
     lateinit var syncViewModel: SyncViewModel
+    private var libraryViewModel: LibraryViewModel? = null
 
     /** kinda dirty, however it signals that we should use the watch status as sync or not*/
     var isLocalList: Boolean = false
     override fun onCreateView(name: String, context: Context, attrs: AttributeSet): View? {
-        viewModel =
-            ViewModelProvider(this)[ResultViewModel2::class.java]
-        syncViewModel =
-            ViewModelProvider(this)[SyncViewModel::class.java]
+
+        viewModel = ViewModelProvider(this)[ResultViewModel2::class.java]
+        syncViewModel = ViewModelProvider(this)[SyncViewModel::class.java]
 
         return super.onCreateView(name, context, attrs)
     }
@@ -1403,7 +1366,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener,
             }
         }
 
-        observe(viewModel.watchStatus,::setWatchStatus)
+        observe(viewModel.watchStatus, ::setWatchStatus)
         observe(syncViewModel.userData, ::setUserData)
         observeNullable(viewModel.subscribeStatus, ::setSubscribeStatus)
 
@@ -1556,6 +1519,26 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener,
                     api.initialize()
                 } catch (e: Exception) {
                     logError(e)
+                }
+            }
+            
+            // we need to run this after we init all apis, otherwise currentSyncApi will fuck itself
+            this@MainActivity.runOnUiThread {
+                // Change library icon with logo of current api in sync
+                libraryViewModel = ViewModelProvider(this@MainActivity)[LibraryViewModel::class.java]
+                libraryViewModel?.currentApiName?.observe(this@MainActivity) {
+                    val syncAPI =  libraryViewModel?.currentSyncApi
+                    Log.i("SYNC_API", "${syncAPI?.name}, ${syncAPI?.idPrefix}")
+                    val icon = if (syncAPI?.idPrefix ==  localListApi.idPrefix) {
+                        R.drawable.library_icon
+                    } else {
+                        syncAPI?.icon ?: R.drawable.library_icon
+                    }
+
+                    binding?.apply {
+                        navRailView.menu.findItem(R.id.navigation_library)?.setIcon(icon)
+                        navView.menu.findItem(R.id.navigation_library)?.setIcon(icon)
+                    }
                 }
             }
         }
@@ -1831,7 +1814,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener,
     }
 
     override fun onAuthenticationError() {
-            finish()
+        finish()
     }
 
     private var backPressedCallback: OnBackPressedCallback? = null

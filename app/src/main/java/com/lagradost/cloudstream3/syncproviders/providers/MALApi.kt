@@ -20,7 +20,7 @@ import com.lagradost.cloudstream3.ui.SyncWatchType
 import com.lagradost.cloudstream3.ui.library.ListSorting
 import com.lagradost.cloudstream3.ui.result.txt
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import com.lagradost.cloudstream3.utils.AppUtils.splitQuery
+import com.lagradost.cloudstream3.utils.AppContextUtils.splitQuery
 import com.lagradost.cloudstream3.utils.DataStore.toKotlinObject
 import java.net.URL
 import java.security.SecureRandom
@@ -40,6 +40,7 @@ class MALApi(index: Int) : AccountManager(index), SyncAPI {
     private val apiUrl = "https://api.myanimelist.net"
     override val icon = R.drawable.mal_logo
     override val requiresLogin = false
+    override val supportDeviceAuth = false
     override val syncIdName = SyncIdName.MyAnimeList
     override var requireLibraryRefresh = true
     override val createAccountUrl = "$mainUrl/register.php"

@@ -11,7 +11,7 @@ import com.lagradost.cloudstream3.ui.download.DownloadClickEvent
 import com.lagradost.cloudstream3.ui.result.START_ACTION_LOAD_EP
 import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
-import com.lagradost.cloudstream3.utils.AppUtils.loadSearchResult
+import com.lagradost.cloudstream3.utils.AppContextUtils.loadSearchResult
 import com.lagradost.cloudstream3.utils.DataStoreHelper
 import com.lagradost.cloudstream3.utils.VideoDownloadHelper
 
@@ -25,7 +25,7 @@ object SearchHelper {
             SEARCH_ACTION_PLAY_FILE -> {
                 if (card is DataStoreHelper.ResumeWatchingResult) {
                     val id = card.id
-                    if(id == null) {
+                    if (id == null) {
                         showToast(R.string.error_invalid_id, Toast.LENGTH_SHORT)
                     } else {
                         if (card.isFromDownload) {
@@ -33,15 +33,15 @@ object SearchHelper {
                                 DownloadClickEvent(
                                     DOWNLOAD_ACTION_PLAY_FILE,
                                     VideoDownloadHelper.DownloadEpisodeCached(
-                                        card.name,
-                                        card.posterUrl,
-                                        card.episode ?: 0,
-                                        card.season,
-                                        id,
-                                        card.parentId ?: return,
-                                        null,
-                                        null,
-                                        System.currentTimeMillis()
+                                        name = card.name,
+                                        poster = card.posterUrl,
+                                        episode = card.episode ?: 0,
+                                        season = card.season,
+                                        id = id,
+                                        parentId = card.parentId ?: return,
+                                        rating = null,
+                                        description = null,
+                                        cacheTime = System.currentTimeMillis(),
                                     )
                                 )
                             )
