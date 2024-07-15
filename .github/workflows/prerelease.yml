@@ -22,8 +22,12 @@ jobs:
       with:
         java-version: '17'
         distribution: 'adopt'
+    - name: Print Directory Structure
+      run: ls -R
     - name: Grant execute permission for gradlew
       run: chmod +x ./gradlew
+    - name: Print Environment Variables
+      run: printenv
     - name: Fetch keystore
       id: fetch_keystore
       run: |
