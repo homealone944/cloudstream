@@ -2,12 +2,6 @@ name: Pre-release
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ master ]
-    paths-ignore:
-      - '*.md'
-      - '*.json'
-      - '**/wcokey.txt'
 
 concurrency: 
   group: "pre-release"
