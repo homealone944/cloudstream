@@ -1,7 +1,7 @@
 name: Pre-release
 
 on:
-  commit:
+  push:
     branches: [ player_Speedup ]
     paths-ignore:
       - '*.md'
