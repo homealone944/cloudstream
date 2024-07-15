@@ -1,6 +1,12 @@
 name: Pre-release
 
 on:
+  commit:
+    branches: [ player_Speedup ]
+    paths-ignore:
+      - '*.md'
+      - '*.json'
+      - '**/wcokey.txt'
   workflow_dispatch:
 
 concurrency: 
